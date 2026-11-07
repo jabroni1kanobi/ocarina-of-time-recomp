@@ -4,7 +4,7 @@ Hand-off written 2026-11-05 at commit `b46d663`, for a fresh session. Read `CLAU
 history is in `docs/plan.md` (Phases 0 to 2 and the NVN2 survey). This file says where the port stands, exactly what
 blocks it, what is already measured, and the order to do the work in.
 
-## Status (2026-11-07 11:05Z): published
+## Status (2026-11-07 11:00Z): published
 
 Repository: https://github.com/jabroni1kanobi/ocarina-of-time-recomp (public), `main` at `18def11` before this section,
 tag and release `v0.1.0` (source only: the installer is still MP4's and does not read a `.nup`, so no installer is
