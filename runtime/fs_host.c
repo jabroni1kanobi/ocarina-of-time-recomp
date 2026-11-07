@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #include "fs.h"
 #include "host.h"
@@ -60,6 +61,22 @@ wchar_t *fs_wide(const char *s) {
     wchar_t *w = malloc((size_t)n * sizeof *w);
     need(w != NULL, "path allocation");
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n);
+    // A path at or past MAX_PATH less a file name's worth fails in the W APIs without the \\?\ prefix: the RomFS
+    // overlay's names reach 184 characters below the repository, so a checkout 80 characters deep could not open them
+    // (the README's fresh-clone check, 2026-11-07). \\?\ paths are not normalised: GetFullPathNameW makes it absolute
+    // with backslashes first.
+    if (n - 1 >= MAX_PATH - 12 && wcsncmp(w, L"\\\\?\\", 4)) {
+        DWORD m = GetFullPathNameW(w, 0, NULL, NULL);
+        wchar_t *l = m ? malloc(((size_t)m + 8) * sizeof *l) : NULL;
+        if (l) {
+            wcscpy(l, L"\\\\?\\");
+            if (GetFullPathNameW(w, m, l + 4, NULL) && wcsncmp(l + 4, L"\\\\", 2)) {   // not for UNC paths
+                free(w);
+                return l;
+            }
+            free(l);
+        }
+    }
     return w;
 }
 
