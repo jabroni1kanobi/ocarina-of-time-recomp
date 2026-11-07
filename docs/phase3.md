@@ -4,6 +4,31 @@ Hand-off written 2026-11-05 at commit `b46d663`, for a fresh session. Read `CLAU
 history is in `docs/plan.md` (Phases 0 to 2 and the NVN2 survey). This file says where the port stands, exactly what
 blocks it, what is already measured, and the order to do the work in.
 
+## Status (2026-11-07 23:58Z): indirect mesh draws drawn; Hookshot compared; a launcher for playing
+
+- **`DrawMeshTasksIndirect` draws now** (`vk_exec_draw.c op_draw_mesh_ind`). NVN2's record is {task count, first task};
+  Vulkan's indirect mesh draw reads {x, y, z}, so the record as it is would be count x 0 x 1, no work. Outside the
+  pass, the count goes into a ring of {count, 1, 1} entries (fill of 1s, the count word copied over x), then
+  `vkCmdDrawMeshTasksIndirectEXT` from the ring. The layout is Hookshot's finding (`gpu/vk/vk_draw.cpp`, credited there
+  to EvilOOT as the fix for Kokiri Forest's foliage, grass, falling leaves and fireflies; GPL: read, not copied).
+  Link's house now draws seven mesh programs it never drew (meshind5 census). `OOT_MESH_IND=0` skips them as before.
+  Kokiri Forest itself is still not reached by our scripts, so the foliage is not yet seen.
+- A program those draws reached bound an unaligned storage range of 1.46 GB, which `bind_range` tried to copy and the
+  run died (meshind4): unaligned ranges over 64 MB are now left out with a log line.
+- The extra draws used more memory during the camera turn and the spare pools refilled mid-turn (a 998 ms pool, the
+  frame with it 1011 ms, perf18). The pools now fill to 4 GiB at load and refill only below a quarter of that
+  (`OOT_VRAM_POOL_FREE_MB`): perf19, two turns, 59.0 fps, worst frame 55 ms, every pool made during loading.
+  sweep43 **PASS** and goron4 **PASS** (81/81 at 0.0 % each, sheets looked at).
+- Hookshot (NotRexed's OoT Switch 2 recomp, GPL-3.0) was evaluated: its version check accepts this dump (build
+  e0f3ccfa); it was built from source with this PC's toolchain (MSYS2 Clang/LLD, the Vulkan SDK's headers, MSYS2's
+  SDL2 and FFmpeg 8 in place of its builder zip's prebuilt tools, which are uploaded by hand and not built in CI), but
+  it extracts the RomFS as 26 GB of loose files (a `.nup` cannot be hard-linked member by member), which the disk
+  floor does not allow; stopped and cleaned up. Only NVIDIA-tested; none of its code is in this tree.
+- `tools/play/oot_play.c`: a windowless launcher (no console window beside the game). The game still needs about a
+  minute before its window appears (the RomFS overlay check).
+- Each game run grows the page file by up to about 17 GB while it runs (the process commits ~23 GB): free disk dips
+  under the floor during a run and returns after it.
+
 ## Status (2026-11-07 11:00Z): published
 
 Repository: https://github.com/jabroni1kanobi/ocarina-of-time-recomp (public), `main` at `18def11` before this section,

@@ -106,16 +106,19 @@ static void top_up(const VkCtx *c, uint32_t type) {
 // not pressure, the call itself). So this thread also keeps spare memory in custom pools of one block each, made by
 // vmaCreatePool under a lock no one else holds yet, and vk_hr_create_image / vk_hr_create_buffer place device-only
 // resources there first: a full pool fails at once (it cannot grow) and the next is tried; when none has room the
-// resource goes the usual way. Kept: OOT_VRAM_POOL_FREE_MB (default 2048) free across the pools while the budget
-// has room (room()), most of it made while the game loads: an allocation in play stalled the frame by 0.6-0.8 s even
-// on this thread (perf14/perf15: the driver or the OS holds the device meanwhile), so play should rarely need one.
+// resource goes the usual way. Filled to OOT_VRAM_POOL_FREE_MB (default 4096) free across the pools while the budget
+// has room (room()), and filled again only once the free part falls under a quarter of that: an allocation in play
+// stalled the frame by 0.6-1 s even on this thread (perf14/15/18: the driver or the OS holds the device meanwhile).
+// Topping up to 2 GiB all the time made pools during every camera turn of Link's house (perf18: a 998 ms pool, the
+// frame with it 1011 ms); the reserve made at load covers the turn, so play rarely needs an allocation.
 // OOT_VRAM_POOLS=0 turns them off.
 #define SP_MAX 256
 #define SP_BLOCK (256ull << 20)
 static struct {
     int on;                   // -1 before vk_headroom_callbacks, 0 off
     uint32_t type;            // the device-local memory type that is not host-visible
-    VkDeviceSize keep;        // free bytes kept across the pools
+    VkDeviceSize keep;        // free bytes the pools are filled to
+    int filling;              // 1 until the free part reaches keep; again once it falls under keep / 4
     VmaPool pool[SP_MAX];
     volatile LONG n, hint;    // pools published (pool[0..n) never change while running), the last one that fitted
     volatile LONG64 hits, misses;
@@ -131,8 +134,8 @@ static void sp_init(const VkCtx *c) {
         if ((f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) && !(f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) &&
             c->mem_props.memoryHeaps[c->mem_props.memoryTypes[t].heapIndex].size > HR_SMALL_HEAP) {
             const char *k = cfg_get("OOT_VRAM_POOL_FREE_MB");
-            SP.keep = (VkDeviceSize)(k && *k ? atoi(k) : 2048) << 20;
-            SP.type = t, SP.on = 1;
+            SP.keep = (VkDeviceSize)(k && *k ? atoi(k) : 4096) << 20;
+            SP.type = t, SP.on = 1, SP.filling = 1;
             rt_log("vk: headroom: spare pools of %llu MiB blocks for device-only resources, memory type %u, %llu MiB kept "
                    "free (OOT_VRAM_POOLS=0 turns them off)", (unsigned long long)(SP_BLOCK >> 20), t,
                    (unsigned long long)(SP.keep >> 20));
@@ -149,6 +152,9 @@ static void sp_top_up(const VkCtx *c) {
         vmaGetPoolStatistics(c->vma, SP.pool[i], &s);
         free += s.blockBytes - s.allocationBytes;
     }
+    if (free < SP.keep / 4) SP.filling = 1;
+    if (!SP.filling) return;
+    if (free >= SP.keep) SP.filling = 0;
     while (free < SP.keep && n < SP_MAX && room(c, SP.type, SP_BLOCK)) {
         VmaPoolCreateInfo pi = {.memoryTypeIndex = SP.type, .blockSize = SP_BLOCK, .minBlockCount = 1, .maxBlockCount = 1};
         VmaPool p;
@@ -158,6 +164,7 @@ static void sp_top_up(const VkCtx *c) {
         SP.pool[n] = p;
         InterlockedExchange(&SP.n, ++n);   // publishes pool[n - 1]
         free += SP_BLOCK;
+        if (free >= SP.keep) SP.filling = 0;
         static volatile LONG logged;
         if (InterlockedIncrement(&logged) <= 32)
             rt_log("vk: headroom: spare pool %ld made in %.1f ms at frame %llu (%.0f MiB free in the pools; %lld resources "

@@ -935,6 +935,16 @@ static int bind_range(VkExec *ex, uint64_t addr, uint64_t size, uint64_t align, 
         return 1;
     }
     if (sp.alloc || bind_no_scratch) return 0;
+    // An unaligned range without a size runs to the end of its pool: a mesh program the indirect draws reached bound
+    // one of 1.46 GB, whose copy failed to allocate and ended the run (meshind4, 2026-11-07). Such a range is not data a
+    // shader reads whole; bigger than this, the binding is left out (the slot gets the fallback) instead.
+    if (n > (64ull << 20)) {
+        static volatile LONG said;
+        if (InterlockedIncrement(&said) <= 4)
+            rt_log("vk_exec: an unaligned buffer binding of %llu bytes at %#llx is too large to copy: left out",
+                   (unsigned long long)n, (unsigned long long)addr);
+        return 0;
+    }
     VkBuffer b;
     VkDeviceSize o;
     RS.volatile_ = 1;
@@ -3078,6 +3088,75 @@ static void op_draw_mesh(VkExec *ex, const p_draw_mesh *d) {
     ex->recorded++;
 }
 
+// DrawMeshTasksIndirect(cmd, ind): the 8-byte record at ind is NVN2's {task count, first task}, as for the direct draw,
+// written on the GPU by the game's culling pass (Kokiri Forest's foliage, grass, falling leaves, fireflies), while
+// vkCmdDrawMeshTasksIndirectEXT reads {x, y, z} workgroups: read as it is, {7, 0} would be 7 x 0 x 1, no work. Before
+// the draw, outside the render pass (transfers cannot run inside one), the record's count goes into a ring of
+// {count, 1, 1} entries: a fill of 1s, then the count word copied over x. A first task other than 0 has no Vulkan
+// counterpart and is drawn from 0, as for the direct draws. The record layout as Hookshot's vk_draw.cpp documents it
+// (GPL: read for behaviour, not copied). OOT_MESH_IND=0 skips these draws, as before.
+#define MESH_RING (64u << 10)   // 4096 entries of 16 bytes: reused after about 370 frames at 11 draws a frame
+static VkBuffer mesh_ring;
+static VmaAllocation mesh_ring_mem;
+static uint32_t mesh_ring_at;
+
+static void mesh_ring_barrier(VkExec *ex, VkPipelineStageFlags src, VkAccessFlags sa, VkPipelineStageFlags dst,
+                              VkAccessFlags da) {
+    VkMemoryBarrier mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = sa, .dstAccessMask = da};
+    vkCmdPipelineBarrier(ex->cb, src, dst, 0, 1, &mb, 0, NULL, 0, NULL);
+    ex->recorded++;
+}
+
+static void op_draw_mesh_ind(VkExec *ex, const p_draw_mesh_ind *d) {
+    static PFN_vkCmdDrawMeshTasksIndirectEXT draw;
+    static int on = -1;
+    if (on < 0) {
+        const char *e = cfg_get("OOT_MESH_IND"), *m = cfg_get("OOT_MESH");
+        on = !(e && *e == '0') && !(m && *m == '0');
+    }
+    VkCtx *c = vk_ctx();
+    if (!on || !c->has_mesh_shader) return;
+    if (!draw) draw = (PFN_vkCmdDrawMeshTasksIndirectEXT)vkGetDeviceProcAddr(c->device, "vkCmdDrawMeshTasksIndirectEXT");
+    if (!draw) return;
+    VkMemSpan sp;
+    if (!vk_mem_resolve(d->ind, 4, &sp) || sp.offset % 4)
+        return warn_once(W_INDIRECT, "indirect mesh draw arguments at %#llx are not backed or not aligned: skipped",
+                         (unsigned long long)d->ind);
+    if (!mesh_ring) {
+        VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = MESH_RING,
+                                 .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT};
+        VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+        if (vmaCreateBuffer(c->vma, &bi, &ai, &mesh_ring, &mesh_ring_mem, NULL) != VK_SUCCESS) {
+            mesh_ring = VK_NULL_HANDLE, on = 0;
+            return warn_once(W_MESH, "no buffer for indirect mesh draw arguments: those draws skipped");
+        }
+    }
+    uint32_t off = mesh_ring_at;
+    mesh_ring_at = (mesh_ring_at + 16) % MESH_RING;
+    if (ex->in_pass) vk_exec_pass_end(ex);
+    VK_MEM_PICK(sp);
+    mesh_ring_barrier(ex, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+    vkCmdFillBuffer(ex->cb, mesh_ring, off, 12, 1);
+    mesh_ring_barrier(ex, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                      VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkBufferCopy cp = {.srcOffset = sp.offset, .dstOffset = off, .size = 4};
+    vkCmdCopyBuffer(ex->cb, sp.buffer, mesh_ring, 1, &cp);
+    mesh_ring_barrier(ex, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+    ex->recorded += 2;
+    vk_mem_count(sp.cls, VK_MUSE_COPY_SRC, 4);
+    VK_MEM_BOUND(sp);
+    c0_binst = 0;
+    PD_MESH = 1;
+    int ok = prepare_draw(ex, NVN_DRAW_PRIMITIVE_TRIANGLES, 0x7fffffff, 0);
+    PD_MESH = 0;
+    if (!ok) return;
+    vk_exec_frame.draws++;
+    draw(ex->cb, mesh_ring, off, 1, 12);
+    ex->recorded++;
+}
+
 // Diagnostic (docs/handoff-whiteout.md): OOT_MESH_CAPTURE=<vertices>[,<from frame>[,<draws>]] writes, for the first
 // <draws> (default 4) mesh draws of <vertices>-vertex meshes from frame <from frame> on, what the task and mesh stages
 // read: the stage's c0 bank, the bound uniform and storage ranges (the CPU's view of guest memory, which holds what the
@@ -3610,7 +3689,7 @@ void vk_exec_op_draw(VkExec *ex, uint32_t op, const void *payload) {
     case OP_DRAW_IDX_IND: op_draw_idx_ind(ex, payload); break;
     case OP_DRAW_IND: op_draw_ind(ex, payload); break;
     case OP_DRAW_MESH: op_draw_mesh(ex, payload); break;
-    case OP_DRAW_MESH_IND: break;   // indirect mesh draws: their argument layout is not settled (docs/mesh-plan.md)
+    case OP_DRAW_MESH_IND: op_draw_mesh_ind(ex, payload); break;
     case OP_DISPATCH_IND: op_dispatch_ind(ex, payload); break;
     default: rt_fatal("vk: op %s is not a draw op", nvn_op_name(op));
     }
