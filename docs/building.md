@@ -59,7 +59,12 @@ In a Windows shell (PowerShell or cmd), from the repository root:
        .venv-win\Scripts\python tools\build_xlate.py
        .venv-win\Scripts\python tools\build_game.py --jobs 8
 
-6. Run `build\v131072\oot.exe`. The first start translates the shaders it meets and compiles their pipelines (cached
+6. Run `build\v131072\oot.exe`, or build the windowless launcher (no console window beside the game; the log goes
+   to `build\v131072\logs\oot.log`) and start that:
+
+       clang -O2 -mwindows -municode tools\play\oot_play.c -o "build\v131072\Play Ocarina of Time.exe"
+
+   The first minute after starting shows no window while the RomFS overlay's 40,588 files are checked. The first start translates the shaders it meets and compiles their pipelines (cached
    under `build\v131072`), so the first minutes and every first visit of an area stutter; later starts do not. Saves
    go to `build\v131072\profile` (`--profile <dir>` for another folder). Settings: the in-game menu, or
    `oot.ini.example` copied to `build\v131072\oot.ini`.
