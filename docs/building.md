@@ -17,7 +17,10 @@ extract your dump into the ignored `build/` folder, the lifter writes the game's
 
   `C:\msys64\ucrt64\bin` must be on `PATH` (the build looks for `clang`, `ld.lld` and `ninja` there).
 - Python 3.12 and Python 3.14 for Windows (python.org; the `py` launcher picks the version). 3.14 is needed by
-  `tools/extract_nup.py` for the standard library's `compression.zstd`.
+  `tools/extract_nup.py` for the standard library's `compression.zstd`; with [uv](https://docs.astral.sh/uv/),
+  `uv run --python 3.14 tools\extract_nup.py ...` does instead of `py -3.14`.
+- [Git for Windows](https://git-scm.com/download/win) first on `PATH`: step 2 fetches zstd with it (an MSYS2 git
+  waited forever on that fetch here).
 - The .NET 10 SDK, and the Visual Studio Build Tools with the C++ workload (the shader translator is published as a
   native executable).
 
