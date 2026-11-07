@@ -4,6 +4,33 @@ Hand-off written 2026-11-05 at commit `b46d663`, for a fresh session. Read `CLAU
 history is in `docs/plan.md` (Phases 0 to 2 and the NVN2 survey). This file says where the port stands, exactly what
 blocks it, what is already measured, and the order to do the work in.
 
+## Status (2026-11-07 11:05Z): published
+
+Repository: https://github.com/jabroni1kanobi/ocarina-of-time-recomp (public), `main` at `18def11` before this section,
+tag and release `v0.1.0` (source only: the installer is still MP4's and does not read a `.nup`, so no installer is
+attached). The content guard ran in CI on the push: success.
+
+Before the first commit: `tools/check_content.py` over the tree (pass), a search of every file for the owner's name,
+e-mail, machine paths, OneDrive or Desktop paths, the dump's file name and 32-hex-digit key strings (the hits rewritten
+to placeholders); the agent briefs `docs/handoff-*.md` (one machine's paths and its owner's rules) stay local
+(`.gitignore`); commits carry the account's GitHub no-reply address. The tracked files hold no `build/`, `generated/`,
+`.nup`, `.xci` or `.nsp` (checked with `git ls-files`). The `tools/dev/lichii_*` scripts are ours; the GPL header they
+drive stays outside the tree; no GPL text is tracked.
+
+Fresh-clone check (`docs/building.md`, followed step by step in an empty folder): venv, ZBIC decoder, ExeFS extraction
+with `--verify`, lift (77 s), translator (15 s), game (441 s), `--probe-astc` pass, a warm-up run and the sweep gate:
+**PASS** (81/81, 0.0 %, sheet looked at). Deviations: the RomFS image and overlay folders were linked from the main
+tree (the 2.8 GB unpack would have crossed the disk floor; the step is the main tree's own) and Python 3.14 came from uv.
+What it found, fixed and pushed: `docs/building.md` was missing (written); an MSYS2 git hung on the zstd fetch (Git for
+Windows named); the pre-commit hook found no `python` (falls back to `py`); `--selftest` failed its "beyond the pool"
+check since the Switch 2 pool holds MP4's 4 GiB request (now a page past the pool: pass); a checkout 80 characters deep
+could not open the RomFS overlay's long names (`fs_wide` now prefixes `\\?\` from 248 characters).
+
+What a player needs: their own `.nup` (no keys), Windows 10/11, a Vulkan 1.3 GPU with `VK_EXT_mesh_shader` and 8 GB or
+more, MSYS2 UCRT64 with Clang, Python 3.12 and 3.14, the .NET 10 SDK with the C++ build tools, Git for Windows, about
+8 GB free on the dump's drive. Open: the items of the section below (the Link's house door dip, first-visit pipeline
+compiles, coverage beyond three scenes), an installer for the `.nup`, the movie network on tensor cores.
+
 ## Status (2026-11-07 10:16Z): Link's house back to 60 fps, the 0.5-1 s freezes gone; five runtime fixes
 
 Measured on the default build (no environment switches) with `tools/dev/perf_summary.py <log> --from 3300` (new:
