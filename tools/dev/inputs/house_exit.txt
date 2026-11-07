@@ -1,0 +1,7 @@
+# Continue into Link's house, face the door, walk out into Kokiri Forest (coverage test)
+1500 A 8
+1800 A 8
+2400 A 8
+2700 A 8
+4400 RSTICK 14000 0 110
+4530 LSTICK 0 32000 420

@@ -1,0 +1,6 @@
+# title -> Continue -> Load (top slot) -> confirm -> gameplay; dump a gameplay frame
+1500 A 8
+1800 A 8
+2400 A 8
+2700 A 8
+5400 DUMP

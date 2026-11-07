@@ -1,0 +1,7 @@
+# Continue into Link's house, then two slow full camera turns (is a slow view slow every time?)
+1500 A 8
+1800 A 8
+2400 A 8
+2700 A 8
+4400 RSTICK 14000 0 900
+5600 RSTICK 14000 0 900

@@ -1,0 +1,11 @@
+# friend profile: Continue, Load the entry 5 below the top, confirm, then a slow camera turn
+1500 A 8
+1800 A 8
+2090 DOWN 6
+2130 DOWN 6
+2170 DOWN 6
+2210 DOWN 6
+2250 DOWN 6
+2400 A 8
+2700 A 8
+4400 RSTICK 14000 0 900

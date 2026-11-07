@@ -1,0 +1,86 @@
+--- a/src/Ryujinx.Graphics.Shader/Instructions/InstEmit.cs
++++ b/src/Ryujinx.Graphics.Shader/Instructions/InstEmit.cs
+@@ -1,6 +1,10 @@
+ using Ryujinx.Graphics.Shader.Decoders;
++using Ryujinx.Graphics.Shader.IntermediateRepresentation;
+ using Ryujinx.Graphics.Shader.Translation;
+ 
++using static Ryujinx.Graphics.Shader.Instructions.InstEmitHelper;
++using static Ryujinx.Graphics.Shader.IntermediateRepresentation.OperandHelper;
++
+ namespace Ryujinx.Graphics.Shader.Instructions
+ {
+     static partial class InstEmit
+@@ -217,30 +221,63 @@ namespace Ryujinx.Graphics.Shader.Instructions
+ 
+         public static void PrmtR(EmitterContext context)
+         {
+-            context.GetOp<InstPrmtR>();
++            InstPrmtR op = context.GetOp<InstPrmtR>();
+ 
+-            context.TranslatorContext.GpuAccessor.Log("Shader instruction PrmtR is not implemented.");
++            EmitPrmt(context, GetSrcReg(context, op.SrcA), GetSrcReg(context, op.SrcB), GetSrcReg(context, op.SrcC), op.Dest, op.PMode);
+         }
+ 
+         public static void PrmtI(EmitterContext context)
+         {
+-            context.GetOp<InstPrmtI>();
++            InstPrmtI op = context.GetOp<InstPrmtI>();
+ 
+-            context.TranslatorContext.GpuAccessor.Log("Shader instruction PrmtI is not implemented.");
++            EmitPrmt(context, GetSrcReg(context, op.SrcA), GetSrcImm(context, Imm20ToSInt(op.Imm20)), GetSrcReg(context, op.SrcC), op.Dest, op.PMode);
+         }
+ 
+         public static void PrmtC(EmitterContext context)
+         {
+-            context.GetOp<InstPrmtC>();
++            InstPrmtC op = context.GetOp<InstPrmtC>();
+ 
+-            context.TranslatorContext.GpuAccessor.Log("Shader instruction PrmtC is not implemented.");
++            EmitPrmt(context, GetSrcReg(context, op.SrcA), GetSrcCbuf(context, op.CbufSlot, op.CbufOffset), GetSrcReg(context, op.SrcC), op.Dest, op.PMode);
+         }
+ 
+         public static void PrmtRc(EmitterContext context)
+         {
+-            context.GetOp<InstPrmtRc>();
+-
+-            context.TranslatorContext.GpuAccessor.Log("Shader instruction PrmtRc is not implemented.");
++            InstPrmtRc op = context.GetOp<InstPrmtRc>();
++
++            EmitPrmt(context, GetSrcReg(context, op.SrcA), GetSrcReg(context, op.SrcC), GetSrcCbuf(context, op.CbufSlot, op.CbufOffset), op.Dest, op.PMode);
++        }
++
++        // OOT: PRMT, the byte permute, was a stub here, so every program using it lost the result (1,664 of the game's
++        // 14,363 SM86 programs: unpacking 16-bit halves, mostly). The index mode (the only one the game's shaders use):
++        // result byte i is byte (selector >> 4i) & 7 of {A (bytes 0-3), C (bytes 4-7)}; with bit 3 of that nibble set,
++        // the byte's sign bit replicated instead. A constant selector folds to shifts and masks. Written from PTX's
++        // prmt.b32 definition; the other modes stay unimplemented and say so.
++        private static void EmitPrmt(EmitterContext context, Operand srcA, Operand srcB, Operand srcC, int rd, PMode mode)
++        {
++            if (mode != 0)
++            {
++                context.TranslatorContext.GpuAccessor.Log($"Shader instruction Prmt mode {mode} is not implemented.");
++                return;
++            }
++
++            Operand result = Const(0);
++
++            for (int i = 0; i < 4; i++)
++            {
++                Operand nibble = context.BitwiseAnd(context.ShiftRightU32(srcB, Const(i * 4)), Const(0xf));
++                Operand index = context.BitwiseAnd(nibble, Const(7));
++                Operand shift = context.BitwiseAnd(context.ShiftLeft(index, Const(3)), Const(31));
++                Operand byteA = context.BitwiseAnd(context.ShiftRightU32(srcA, shift), Const(0xff));
++                Operand byteC = context.BitwiseAnd(context.ShiftRightU32(srcC, shift), Const(0xff));
++                Operand value = context.ConditionalSelect(context.ICompareLessUnsigned(index, Const(4)), byteA, byteC);
++                Operand negative = context.ICompareNotEqual(context.BitwiseAnd(value, Const(0x80)), Const(0));
++                Operand replicated = context.ConditionalSelect(negative, Const(0xff), Const(0));
++                Operand sign = context.ICompareNotEqual(context.BitwiseAnd(nibble, Const(8)), Const(0));
++                value = context.ConditionalSelect(sign, replicated, value);
++                result = context.BitwiseOr(result, context.ShiftLeft(value, Const(i * 8)));
++            }
++
++            context.Copy(GetDest(rd), result);
+         }
+ 
+         public static void R2b(EmitterContext context)

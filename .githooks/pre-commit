@@ -1,0 +1,5 @@
+#!/bin/sh
+# Enable once per clone: git config core.hooksPath .githooks
+# Windows installs name the interpreter python (or only have the py launcher), many Linux installs only python3.
+if command -v python >/dev/null 2>&1; then py=python; elif command -v python3 >/dev/null 2>&1; then py=python3; else py=py; fi
+exec "$py" tools/check_content.py --staged

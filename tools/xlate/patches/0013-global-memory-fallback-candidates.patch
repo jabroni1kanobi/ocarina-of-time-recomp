@@ -1,0 +1,81 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
+@@ -75,6 +75,10 @@ namespace Ryujinx.Graphics.Shader.Translation.Optimizations
+             private readonly Dictionary<LsKey, Dictionary<uint, SearchResult>> _sharedEntries;
+             private readonly HelperFunctionManager _hfm;
+ 
++            // OOT: the 16-byte aligned words of the driver constant buffer the program reads anywhere, the candidates
++            // for an access whose base no search finds (TryGenerateMultiTargetStorageOp).
++            public List<uint> FallbackCbs { get; } = [];
++
+             public GtsContext(HelperFunctionManager hfm)
+             {
+                 _entries = [];
+@@ -215,6 +219,8 @@ namespace Ryujinx.Graphics.Shader.Translation.Optimizations
+         {
+             GtsContext gtsContext = new(hfm);
+ 
++            CollectFallbackCbs(gtsContext, blocks);
++
+             foreach (BasicBlock block in blocks)
+             {
+                 for (LinkedListNode<INode> node = block.Operations.First; node != null; node = node.Next)
+@@ -653,6 +659,16 @@ namespace Ryujinx.Graphics.Shader.Translation.Optimizations
+ 
+             targetCbs.Sort();
+ 
++            if (targetCbs.Count == 0 && gtsContext.FallbackCbs.Count != 0)
++            {
++                // OOT: an address computed in a loop or from several driver constants (the NVN2 compute programs of
++                // the game's upscaler) defeats the search, and the access used to read zero or store nothing. Real
++                // hardware has one address space: compare the address against every storage buffer the program
++                // loads a base of, as the phi search does for the buffers it found.
++                targetCbs.AddRange(gtsContext.FallbackCbs);
++                gpuAccessor.Log($"Global memory operation \"{operation.Inst}\" checks the {targetCbs.Count} storage buffers the program loads.");
++            }
++
+             if (targetCbs.Count == 0)
+             {
+                 gpuAccessor.Log($"Failed to find storage buffer for global memory operation \"{operation.Inst}\".");
+@@ -774,6 +790,41 @@ namespace Ryujinx.Graphics.Shader.Translation.Optimizations
+             return true;
+         }
+ 
++        // OOT: the candidates of TryGenerateMultiTargetStorageOp's fallback: every word of the driver reserved constant
++        // buffer at a 16-byte boundary (the NVN storage buffer tables: {u64 address, u32 size} entries) the program reads.
++        private static void CollectFallbackCbs(GtsContext gtsContext, BasicBlock[] blocks)
++        {
++            foreach (BasicBlock block in blocks)
++            {
++                for (LinkedListNode<INode> node = block.Operations.First; node != null; node = node.Next)
++                {
++                    if (node.Value is not Operation operation)
++                    {
++                        continue;
++                    }
++
++                    for (int index = 0; index < operation.SourcesCount; index++)
++                    {
++                        Operand source = operation.GetSource(index);
++
++                        if (source.Type == OperandType.ConstantBuffer &&
++                            source.GetCbufSlot() == DriverReservedCb &&
++                            (source.GetCbufOffset() & 3) == 0)
++                        {
++                            uint packed = PackCbSlotAndOffset(DriverReservedCb, source.GetCbufOffset());
++
++                            if (!gtsContext.FallbackCbs.Contains(packed))
++                            {
++                                gtsContext.FallbackCbs.Add(packed);
++                            }
++                        }
++                    }
++                }
++            }
++
++            gtsContext.FallbackCbs.Sort();
++        }
++
+         private static uint PackCbSlotAndOffset(int cbSlot, int cbOffset)
+         {
+             return (uint)((ushort)cbSlot | ((ushort)cbOffset << 16));
