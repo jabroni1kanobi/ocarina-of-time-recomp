@@ -26,6 +26,8 @@
 # The game's language, a Switch language code: ja, en-US, en-GB, fr, fr-CA, de, it, es, es-419, zh-Hans, zh-Hant, ko
 # (nl, pt, pt-BR and ru fall back inside the game). The Windows user locale decides when unset.
 # lang = en-US
+# 1: spoken lines in Japanese whatever the language above (the text keeps it).
+# jp_voice = 0
 # docked (the console in its dock, 1080p) or handheld (720p).
 # operation_mode = docked
 

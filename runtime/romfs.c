@@ -24,6 +24,7 @@
 #include <bcrypt.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 
 #include "cfg.h"
@@ -690,6 +691,27 @@ uint32_t romfs_mount(const char *name) {
     return 0;
 }
 
+// OOT_JP_VOICE=1 (the menu's "Japanese voices"): a voice file (Voice/Resource/<pack>_..., its .bars bank and its
+// Stream/<pack>_....bwav lines) is looked up in the Japanese pack, JPja, whatever pack the game language picked, when
+// that file exists (else the game's own). The voice files of a line have the same names in every pack, with the pack's
+// region and language code first; the text keeps the game language. Read on every lookup (cfg_bool), so it applies
+// from the next line the game opens.
+static const char *voice_pack(const char *p, char *buf, size_t cap) {
+    if (strncmp(p, "Voice/Resource/", 15) || !cfg_bool("OOT_JP_VOICE")) return p;
+    const char *name = strrchr(p, '/') + 1;
+    if (strlen(name) < 6 || name[4] != '_' || !memcmp(name, "JPja", 4) || !isupper((unsigned char)name[0]) ||
+        !isupper((unsigned char)name[1]) || !islower((unsigned char)name[2]) || !islower((unsigned char)name[3]))
+        return p;
+    size_t n = strlen(p);
+    if (n >= cap) return p;
+    memcpy(buf, p, n + 1);
+    memcpy(buf + (name - p), "JPja", 4);
+    if (file_index(buf) == UINT64_MAX) return p;
+    static volatile LONG said;
+    if (InterlockedIncrement(&said) <= 4) rt_log("romfs: Japanese voices: %s -> %s", p, buf);
+    return buf;
+}
+
 uint32_t romfs_open(uint64_t *out, const char *path, int mode) {
     fs_trace("rom", path);
     if (!out || mode != FS_OPEN_READ) return FS_R_UNSUPPORTED_OPEN;
@@ -697,6 +719,8 @@ uint32_t romfs_open(uint64_t *out, const char *path, int mode) {
     if (!romfs_path_collapse(path, norm, sizeof norm)) return FS_R_PATH_NOT_FOUND;
     const char *p = romfs_path_relative(mount_of(norm), norm);
     if (!p) return FS_R_PATH_NOT_FOUND;
+    char jp[1024];
+    p = voice_pack(p, jp, sizeof jp);
     uint64_t i = file_index(p);
     if (i == UINT64_MAX) return FS_R_PATH_NOT_FOUND;
     uint32_t ov = overlay_slot(i);
@@ -806,6 +830,8 @@ uint32_t romfs_entry_type(int *out, const char *path) {
     if (!romfs_path_collapse(path, norm, sizeof norm)) return FS_R_PATH_NOT_FOUND;
     const char *p = romfs_path_relative(mount_of(norm), norm);
     if (!p) return FS_R_PATH_NOT_FOUND;
+    char jp[1024];
+    p = voice_pack(p, jp, sizeof jp);
     if (file_index(p) != UINT64_MAX) {
         *out = FS_ENTRY_FILE;
         return 0;

@@ -554,6 +554,7 @@ static void tab_game(float scale) {
     opt_toggle("OOT_CLOTH_REALTIME", UI_MENU_CLOTH_REALTIME, UI_MENU_CLOTH_REALTIME_DESC);
     opt_toggle("OOT_HIGHFPS_FIX", UI_MENU_HIGHFPS_FIX, UI_MENU_HIGHFPS_FIX_DESC);
     row_game_lang();
+    opt_toggle("OOT_JP_VOICE", UI_MENU_JP_VOICE, UI_MENU_JP_VOICE_DESC);
     static const UiTextId mode[] = {UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD};
     opt_choice("OOT_OPERATION_MODE", UI_MENU_OPERATION_MODE, mode, 2, UI_MENU_OPERATION_MODE_DESC);
     opt_end();
