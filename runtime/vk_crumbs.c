@@ -60,7 +60,7 @@ void vk_crumbs_release(void) {
 // marker between draws loses the device on NVIDIA (RTX 4070, driver 1.4.351: an "invalid write at 0" at the first
 // frame, inside a pass or not), and so does a checkpoint (VK_NV_device_diagnostic_checkpoints, which is tried first
 // where it exists), so the option is refused there; elsewhere it is untested.
-#define OP_RING 1024
+#define OP_RING 65536   // 2026-11-08: 1024 lost the description of a hung op (the CPU records on while the GPU hangs)
 static int ops_on = -1;
 static uint64_t op_serial;
 static char op_desc[OP_RING][160];

@@ -1448,6 +1448,12 @@ static uint64_t ubo_ptr(const VkExec *ex, int st, const GfxShaderRes *r) {
     return a;
 }
 
+static int push_ptr_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = cfg_get("OOT_PUSH_PTR"); on = e && *e && strcmp(e, "0") != 0; }
+    return on;
+}
+
 static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *r, int written) {
     if (!__atomic_load_n(&LIM.ubo_max, __ATOMIC_ACQUIRE)) limits_init();
     uint64_t max = LIM.sbo_max, align = LIM.sbo_align;
@@ -1457,6 +1463,17 @@ static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *
     const p_bind_buf *b = NULL;
     if (slot >= 0 && slot < 16) b = ubo ? &ex->ubo[st][slot] : &ex->ssbo[st][slot];
     else if (ubo_ptr_res(r)) up.addr = ubo_ptr(ex, st, r), b = &up;   // size 0: up to the end of the backing
+    else if (push_ptr_on() && st == NVN_STAGE_CS && r->cbuf_slot == 0 && (uint64_t)r->handle * 4 >= 0x10 &&
+             (uint64_t)r->handle * 4 + 8 <= 0x10 + PUSH_CS_MAX) {
+        // OOT_PUSH_PTR=1 (off by default): NVN2 compute programs push raw pointers with their constants (c0 0x10 on,
+        // c0_fill_nvn2), and the translator's fallback names such a word as a storage base: the reflection probe's
+        // compute sums its coefficients through one (RED.ADD.F32 at c0 0x30 + 0x80), and without this the sums go to
+        // the zero buffer. Off: with it on, the game lost the device at the Kokiri load in a 9x5x1 dispatch that
+        // writes through c0 0x20 (kok4, kok5, 2026-11-08; the pending translator patches were on too), not yet
+        // understood. Size 0: to the end of the backing, as ubo_ptr.
+        memcpy(&up.addr, ex->push_cs + ((uint64_t)r->handle * 4 - 0x10), 8);
+        b = &up;
+    }
     if (b) {
         // vk_caps.c: shaders translated for sbuf_align address the buffer from its address rounded down to it.
         uint64_t lead = vk_caps.sbuf_align ? b->addr & (vk_caps.sbuf_align - 1) : 0;

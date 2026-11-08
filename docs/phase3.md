@@ -4,6 +4,47 @@ Hand-off written 2026-11-05 at commit `b46d663`, for a fresh session. Read `CLAU
 history is in `docs/plan.md` (Phases 0 to 2 and the NVN2 survey). This file says where the port stands, exactly what
 blocks it, what is already measured, and the order to do the work in.
 
+## Status (2026-11-08 03:15Z): Kokiri's reflection probe was black (a translator defect, fixed); the haze is not that; two more defects found, their fixes parked
+
+The owner's Kokiri Forest save (`build/profile-kokiri`, his File 3 copied into the top slot; `build/logs/kokiri_load_dump.txt`
+= `continue_load.txt` with a DUMP at tick 5400) reaches gameplay in about 75 s, so no question needed the intro. Two
+frame dumps of it (kok1 frame 4533, kok2 frame 4512; passes.txt and images.txt kept under `build/logs/kok*-dump-*`) and
+a census of the shader cache's own translator notes (`tools/dev/cache_notes.py`, new: counts the `.res.json` notes by
+text and stage, maps a shader to the dump passes that use it by the SPIR-V's FNV-1a) gave:
+
+1. **The reflection cube's filter drew nothing** (passes 136-152: 128x128 down to 1x1 into the probe at 0x25fae6000,
+   every texel 0, while the scene's face render into the source cube held values). The filter's vertex shader carried
+   the note "Failed to find targets for BRX instruction at 0x190": the Ampere compiler clamps the face index on the
+   uniform datapath (`UISETP.LT.U32`, `USEL`, `USHF`, `ULDC c[1]`, `BRXU`), `sm86_lower.c` makes that ISETP + SEL + SHL +
+   LDC + BRX, and Ryujinx's decoder knows only the IMNMX.U32 + SHL + LDC idiom: every case of the switch was dropped and
+   patch 0006 left the position at 0, a degenerate quad. The probe compute (dispatch 4x4x6) had the same note. Patch
+   0020 (`Decoder.cs FindBrxTargetRange`) accepts a SEL whose immediate is the bound when the ISETP that defines its
+   predicate compares the same register with the same bound, unsigned, so that the select is a min. kok2: level 0 of
+   the probe holds the scene (max 1.78), none of the 1,756 freshly translated shaders carries the note.
+   **The haze did not move**: shot means 202.6 and 203.4 against 200.7 and 202.2 before (480x270, `f05200`/`f05300`).
+2. **Float reductions are dropped**: "Invalid reduction type: F32FtzRn" 72 times, seven compute programs: the probe
+   compute (four `RED.E.ADD.F32.FTZ.RN` through a pointer the game pushes with its compute constants, c0 0x30 + 0x80),
+   the single-workgroup screen reductions (1x1x1 dispatches after the fog, reading the 1920x1080 r32f buffers and the
+   shadow maps: the exposure and sun-visibility sums), one with 12 reductions through a pointer at c[1][0] that the
+   runtime does not replay. Each does a wave reduction, then one RED per wave. Ryujinx has no float atomic; the parked
+   patch `patches/pending/0021` makes `RED/ATOM.ADD.F32` a bounded compare-and-swap loop (offline: the probe compute
+   translates with no note, four loops, spirv-val clean), and `vk_exec_draw.c ssbo_info` can bind a storage base that
+   lives in the push constants (`OOT_PUSH_PTR=1`, off): until then such sums land in the zero buffer. **Parked** because
+   every run with 0021 on lost the Vulkan device at the Kokiri load (kok3, kok3b, kok4, kok5, frame ~3060): with
+   `OOT_CRUMBS=ops` (the description ring now 65536 deep) the GPU hung in a 9x5x1 dispatch (kok2's pass 128: reads the
+   depth, writes through the pushed pointer at c0 0x20, no loop in its SPIR-V) right after a 1x1x1 reduction. Which of
+   the three changes hangs it is not separated yet (`docs/handoff-kokiri-washout-2.md`, order of work 2).
+3. **White flashes**: parked patch `pending/0022` keeps every float colour output finite at the fragment exit (NaN to 0,
+   magnitude within 1e30; integer targets untouched), the behaviour Hookshot documents for the same flash (GPL: the
+   idea, own code). Not run in the game yet.
+- Also from the notes: "Attribute offset 0x5C is not valid" on 1,406 vertex shaders (3,062 notes), and a lowering
+  failure "TEX unpacked operands" of one fragment program (f931e8db..., present in every run; its draws are skipped).
+- Rules kept: the owner's game closed before every run (`Get-Process oot`), runs through `run_oot.ps1`, dumps deleted
+  after reading (1.6 GB each; a run grows the page file to about 11 GB free on C: and gives it back). `oot.ini`
+  fps_limit set back to 60 while this is open. The build left in place (patch 0020, the toggle off) ran the Kokiri
+  route clean once more after the parking (kok6: 238 s, 6,687 frames, probe filled, shot mean 202.3/204.0).
+  Gates on this build: sweep44 (Link's house) and goron5 (Goron City) 81/81 shots, worst blown 0.0 %, no crash.
+
 ## Status (2026-11-08 00:55Z): spoken dialogue was silent: voice stream paths with a doubled slash; fixed
 
 The owner heard music but no voices. The voice lines are Opus BWAVs (codec 2, 48 kHz mono) in nine language packs

@@ -1,0 +1,84 @@
+--- a/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs
++++ b/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs
+@@ -601,6 +601,42 @@
+             }
+ 
+             BlockLocation imnmxLocation = FindFirstRegWrite(visited, shlLocation, opShl.SrcA);
++            if (imnmxLocation.Block != null && imnmxLocation.IsImmInst(InstName.Sel))
++            {
++                // OOT: the Ampere compiler clamps a jump-table index on the uniform datapath, UISETP.LT.U32 UPx, URa, UpperBound
++                // then USEL URa, URa, UpperBound, UPx, which runtime/sm86_lower.c lowers to ISETP and SEL. SEL Rd = P ? Ra :
++                // UpperBound with P = (Ra < UpperBound) is IMNMX.U32 Rd, Ra, UpperBound, PT (the reflection cube's filter
++                // and the probe compute switch on the face: without the targets, every case was dropped and both drew
++                // nothing). Accepted only with the ISETP that defines P found, on the same register and bound, unsigned.
++                GetOp<InstSelI>(imnmxLocation, out InstSelI opSel);
++                BlockLocation isetpLocation = FindFirstPredWrite(visited, imnmxLocation, opSel.SrcPred);
++                if (isetpLocation.Block == null || !isetpLocation.IsImmInst(InstName.Isetp))
++                {
++                    return (0, 0);
++                }
++
++                GetOp<InstIsetpI>(isetpLocation, out InstIsetpI opIsetp);
++
++                bool belowBound = opIsetp.IComp == IComp.Lt || opIsetp.IComp == IComp.Le;
++                bool atOrAboveBound = opIsetp.IComp == IComp.Ge || opIsetp.IComp == IComp.Gt;
++                bool selectsMin = belowBound ? !opSel.SrcPredInv : atOrAboveBound && opSel.SrcPredInv;
++
++                if (!selectsMin ||
++                    opIsetp.Signed ||
++                    opIsetp.X ||
++                    opIsetp.Bop != BoolOp.And ||
++                    opIsetp.SrcPred != RegisterConsts.PredicateTrueIndex ||
++                    opIsetp.SrcPredInv ||
++                    opIsetp.DestPred != opSel.SrcPred ||
++                    opIsetp.SrcA != opSel.SrcA ||
++                    opIsetp.Imm20 != opSel.Imm20)
++                {
++                    return (0, 0);
++                }
++
++                return (opLdc.CbufOffset, opSel.Imm20 + 1);
++            }
++
+             if (imnmxLocation.Block == null || !imnmxLocation.IsImmInst(InstName.Imnmx))
+             {
+                 return (0, 0);
+@@ -655,6 +691,38 @@
+                     {
+                         return new BlockLocation(block, i);
+                     }
++                }
++
++                foreach (Block predecessor in block.Predecessors)
++                {
++                    if (visited.Add(predecessor))
++                    {
++                        toVisit.Enqueue(new BlockLocation(predecessor, predecessor.OpCodes.Count));
++                    }
++                }
++            }
++
++            return new BlockLocation(null, 0);
++        }
++
++        // OOT: the first instruction before location that writes predicate predIndex (the plain Pd form at bits 3-5, as
++        // ISETP writes it), by the walk of FindFirstRegWrite.
++        private static BlockLocation FindFirstPredWrite(HashSet<Block> visited, BlockLocation location, int predIndex)
++        {
++            Queue<BlockLocation> toVisit = new();
++            toVisit.Enqueue(location);
++            visited.Add(location.Block);
++
++            while (toVisit.TryDequeue(out BlockLocation currentLocation))
++            {
++                Block block = currentLocation.Block;
++                for (int i = currentLocation.Index - 1; i >= 0; i--)
++                {
++                    InstOp op = block.OpCodes[i];
++                    if ((op.Props & InstProps.PdMask) == InstProps.Pd && (int)((op.RawOpCode >> 3) & 7) == predIndex)
++                    {
++                        return new BlockLocation(block, i);
++                    }
+                 }
+ 
+                 foreach (Block predecessor in block.Predecessors)
