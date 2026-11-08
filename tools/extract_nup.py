@@ -17,7 +17,7 @@ Switch 2 modules whose segments are ZBIC (NSO flag bit 7) are rewritten as plain
 toolchain/zbic/nso_unzbic (tools/build_zbic.py); the module as stored goes to exefs-zbic/, and each rewritten
 segment is checked against the SHA-256 in its NSO header.
 
-Needs Python 3.14 or later for the standard library's compression.zstd; no keys are needed, as the container holds
+Needs Python 3.14 or later for the standard library's compression.zstd, or the zstandard package before it; no keys are needed, as the container holds
 the files decrypted.
 
 Layout, as Lichii (GPL-3.0, read for behaviour only, src/core/file_sys/nup_container.cpp) reads it; all integers
@@ -48,8 +48,16 @@ from pathlib import Path
 
 try:
     from compression import zstd
-except ImportError:
-    zstd = None
+except ImportError:   # before Python 3.14: the zstandard package (tools/requirements.txt), its streaming decompressor
+    try:
+        import zstandard as _zstandard
+
+        class zstd:
+            @staticmethod
+            def ZstdDecompressor():
+                return _zstandard.ZstdDecompressor().decompressobj()
+    except ImportError:
+        zstd = None
 
 ROOT = Path(__file__).resolve().parent.parent
 UNZBIC = ROOT / 'toolchain' / 'zbic' / ('nso_unzbic.exe' if os.name == 'nt' else 'nso_unzbic')
@@ -174,7 +182,7 @@ class Nup:
                 also and also.update(chunk)
                 left -= len(chunk)
         else:
-            require(zstd is not None, 'zstd members need Python 3.14+ (compression.zstd)')
+            require(zstd is not None, 'zstd members need Python 3.14+ (compression.zstd) or the zstandard package')
             self.f.seek(rec['offset'])
             dec = zstd.ZstdDecompressor()
             left, written = rec['extent'], 0

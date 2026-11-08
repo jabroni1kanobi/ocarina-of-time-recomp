@@ -136,6 +136,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--id-only", action="store_true", help="write oot_xlate.id for the exe already built")
     parser.add_argument("--out", type=Path, help="build directory instead of build/xlate")
+    parser.add_argument("--portable", action="store_true",
+                        help="a self-contained single-file .NET program instead of NativeAOT (no Visual Studio needed)")
     a = parser.parse_args()
     if a.out:
         global BUILD
@@ -147,8 +149,14 @@ def main() -> None:
     dotnet = shutil.which("dotnet")
     if not dotnet:
         sys.exit("missing: dotnet (.NET 10 SDK)")
-    if not (VSWHERE_DIR / "vswhere.exe").is_file() and not shutil.which("vswhere"):
-        sys.exit(f"missing: vswhere.exe (expected in {VSWHERE_DIR}); NativeAOT cannot link without it")
+    # NativeAOT links with the Visual Studio C++ tools (found through vswhere.exe). Without them, or with --portable,
+    # the translator is a self-contained single-file .NET program: the same code and output, no .NET runtime needed
+    # to run it, a slower first start. oot.exe keeps its translator processes running (--serve), so the start counts
+    # once per run.
+    native = not a.portable and ((VSWHERE_DIR / "vswhere.exe").is_file() or shutil.which("vswhere"))
+    if not native:
+        print("translator: self-contained .NET program (no NativeAOT: " +
+              ("--portable)" if a.portable else f"no vswhere.exe in {VSWHERE_DIR})"))
     env = dict(os.environ)
     env["PATH"] = str(VSWHERE_DIR) + os.pathsep + env["PATH"]
 
@@ -163,7 +171,9 @@ def main() -> None:
     shutil.rmtree(out, ignore_errors=True)
     cmd = [
         dotnet, "publish", str(work / "oot_xlate.csproj"), "-c", "Release", "-r", "win-x64",
-        "-p:PublishAot=true", "-p:InvariantGlobalization=true", f"-p:RyuSrc={src}", "-o", str(out),
+        *(["-p:PublishAot=true"] if native else ["--self-contained", "true", "-p:PublishSingleFile=true",
+                                                  "-p:IncludeNativeLibrariesForSelfExtract=true"]),
+        "-p:InvariantGlobalization=true", f"-p:RyuSrc={src}", "-o", str(out),
     ]
     if subprocess.run(cmd, env=env).returncode != 0:
         sys.exit("dotnet publish failed")
