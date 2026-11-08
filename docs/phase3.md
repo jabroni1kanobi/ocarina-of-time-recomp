@@ -4,6 +4,19 @@ Hand-off written 2026-11-05 at commit `b46d663`, for a fresh session. Read `CLAU
 history is in `docs/plan.md` (Phases 0 to 2 and the NVN2 survey). This file says where the port stands, exactly what
 blocks it, what is already measured, and the order to do the work in.
 
+## Status (2026-11-08 00:55Z): spoken dialogue was silent: voice stream paths with a doubled slash; fixed
+
+The owner heard music but no voices. The voice lines are Opus BWAVs (codec 2, 48 kHz mono) in nine language packs
+(`Voice/Resource/Stream/<USen|JPja|USes|USpt|USfr|EUde|EUfr|EUit|EUes>_...bwav`, all served by our RomFS), and the
+Opus decoder worked (`ov_media.c`, now logging its first calls and every refusal: 65,536 packets decoded in voice1).
+The fs trace (`OOT_TRACE=perf,fs`, voice2) showed the cause: the game opens each line as
+`content://Voice/Resource//Stream/USen_EventFlowMsg-_Dm_Kokiri_0000--Dm_Kokiri_0000_Text_000_b.bwav`, and our lookup
+(`romfs_path.h romfs_path_relative`) skipped repeated separators only at the root and rejected the empty component in
+`Resource//Stream`: every voice line returned "path not found" (0x202) while its bank (`.bars`) opened. Horizon's fs
+collapses repeated separators; `romfs.c` now looks paths up after `romfs_path_collapse` (open, entry type, directory
+prefix). voice3: the same lines open (9 of 9, 0 failures), self-test passes. Confirmed by ear only (the fs trace stops
+logging reads after the first 4,000, before the first voice line).
+
 ## Status (2026-11-07 23:58Z): indirect mesh draws drawn; Hookshot compared; a launcher for playing
 
 - **`DrawMeshTasksIndirect` draws now** (`vk_exec_draw.c op_draw_mesh_ind`). NVN2's record is {task count, first task};

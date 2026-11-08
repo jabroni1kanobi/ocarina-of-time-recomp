@@ -32,3 +32,19 @@ static inline const char *romfs_path_relative(const char *mount, const char *pat
     while (*path == '/') ++path;
     return romfs_path_valid_relative(path) ? path : NULL;
 }
+
+// path with every run of '/' collapsed to one, into buf (cap bytes); 0 when it does not fit. Horizon's fs normalises
+// repeated separators anywhere in a path: Ocarina of Time opens its voice streams as
+// "content://Voice/Resource//Stream/<name>.bwav", which the strict check above rejects (every spoken line was silent,
+// 2026-11-08). romfs.c looks paths up in this form.
+static inline int romfs_path_collapse(const char *path, char *buf, size_t cap) {
+    size_t o = 0;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/' && o && buf[o - 1] == '/') continue;
+        if (o + 1 >= cap) return 0;
+        buf[o++] = *p;
+    }
+    if (!cap) return 0;
+    buf[o] = 0;
+    return 1;
+}

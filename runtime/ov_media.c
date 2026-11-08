@@ -57,8 +57,17 @@ static OpusDecoder *opus_new(int rate, int channels) {
 }
 
 // size_t GetHardwareOpusDecoderWorkBufferSize(int rate, int channels, int option)
+// The game's voice lines are Opus (BWAV codec 2): every refusal below is logged, as a refused decoder silences them
+// without any other sign (the owner's report of no spoken dialogue, 2026-11-08).
+static volatile LONG n_work, n_init, n_dec, n_dec_bad;
+
 static void ov_work_size(Cpu *c) {
-    ret_x(c, valid_format((int)arg_x(c, 0), (int)arg_x(c, 1)) ? OPUS_WORK_SIZE : 0);
+    int rate = (int)arg_x(c, 0), channels = (int)arg_x(c, 1);
+    uint64_t v = valid_format(rate, channels) ? OPUS_WORK_SIZE : 0;
+    if (InterlockedIncrement(&n_work) <= 4 || !v)
+        rt_log("nn::codec: GetHardwareOpusDecoderWorkBufferSize(%d Hz, %d ch, %d) = %#llx", rate, channels,
+               (int)arg_x(c, 2), (unsigned long long)v);
+    ret_x(c, v);
 }
 
 // Result InitializeHardwareOpusDecoder(HardwareOpusDecoderType *d, int rate, int channels, void *work, size_t size,
@@ -67,7 +76,15 @@ static void ov_work_size(Cpu *c) {
 static void ov_initialize(Cpu *c) {
     uint64_t guest = arg_x(c, 0), size = arg_x(c, 4);
     int rate = (int)arg_x(c, 1), channels = (int)arg_x(c, 2);
-    if (!guest || !valid_format(rate, channels) || size < OPUS_WORK_SIZE) { ret_x(c, CODEC_R_INVALID); return; }
+    if (!guest || !valid_format(rate, channels) || size < OPUS_WORK_SIZE) {
+        rt_log("nn::codec: InitializeHardwareOpusDecoder(%#llx, %d Hz, %d ch, work %#llx) refused",
+               (unsigned long long)guest, rate, channels, (unsigned long long)size);
+        ret_x(c, CODEC_R_INVALID);
+        return;
+    }
+    if (InterlockedIncrement(&n_init) <= 8)
+        rt_log("nn::codec: InitializeHardwareOpusDecoder(%#llx, %d Hz, %d ch, work %#llx)", (unsigned long long)guest,
+               rate, channels, (unsigned long long)size);
     OpusDecoder *fresh = opus_new(rate, channels);
     AcquireSRWLockExclusive(&lock);
     Decoder *d = decoders;
@@ -147,9 +164,20 @@ static void ov_decode(Cpu *c) {
     int *samples = arg_p(c, 2);
     int16_t *out = arg_p(c, 3);
     const uint8_t *in = arg_p(c, 5);
-    if (!consumed || !samples || !out || !in || in_size < 8) { ret_x(c, CODEC_R_INVALID); return; }
+    if (!consumed || !samples || !out || !in || in_size < 8) {
+        if (InterlockedIncrement(&n_dec_bad) <= 8)
+            rt_log("nn::codec: DecodeOpusInterleavedWithHardware refused: input of %llu bytes", (unsigned long long)in_size);
+        ret_x(c, CODEC_R_INVALID);
+        return;
+    }
     uint32_t n = be32(in), range = be32(in + 4);
-    if (n > in_size - 8 || n > INT_MAX) { ret_x(c, CODEC_R_INVALID); return; }
+    if (n > in_size - 8 || n > INT_MAX) {
+        if (InterlockedIncrement(&n_dec_bad) <= 8)
+            rt_log("nn::codec: DecodeOpusInterleavedWithHardware refused: frame header says %u bytes of %llu (first words "
+                   "%08x %08x)", n, (unsigned long long)in_size, n, range);
+        ret_x(c, CODEC_R_INVALID);
+        return;
+    }
     Decoder *d = acquire(guest, "DecodeOpusInterleavedWithHardware");
     size_t capacity = out_size / (sizeof(int16_t) * (size_t)d->channels);
     if (capacity > INT_MAX) { release(d); ret_x(c, CODEC_R_INVALID); return; }
@@ -166,6 +194,9 @@ static void ov_decode(Cpu *c) {
         rt_log("nn::codec: Opus final range %#x != stream %#x (logged once)", (unsigned)final, (unsigned)range);
     *consumed = 8 + n;
     *samples = got;
+    LONG k = InterlockedIncrement(&n_dec);
+    if (k <= 3 || !(k & (k - 1)) && k >= 1024)
+        rt_log("nn::codec: decode %ld: %u bytes -> %d samples", k, n, got);
     ret_x(c, 0);
 }
 

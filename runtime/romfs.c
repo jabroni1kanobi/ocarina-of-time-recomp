@@ -693,7 +693,9 @@ uint32_t romfs_mount(const char *name) {
 uint32_t romfs_open(uint64_t *out, const char *path, int mode) {
     fs_trace("rom", path);
     if (!out || mode != FS_OPEN_READ) return FS_R_UNSUPPORTED_OPEN;
-    const char *p = romfs_path_relative(mount_of(path), path);
+    char norm[1024];
+    if (!romfs_path_collapse(path, norm, sizeof norm)) return FS_R_PATH_NOT_FOUND;
+    const char *p = romfs_path_relative(mount_of(norm), norm);
     if (!p) return FS_R_PATH_NOT_FOUND;
     uint64_t i = file_index(p);
     if (i == UINT64_MAX) return FS_R_PATH_NOT_FOUND;
@@ -800,7 +802,9 @@ void romfs_close(uint64_t h) {
 
 uint32_t romfs_entry_type(int *out, const char *path) {
     if (!out) return FS_R_INVALID;
-    const char *p = romfs_path_relative(mount_of(path), path);
+    char norm[1024];
+    if (!romfs_path_collapse(path, norm, sizeof norm)) return FS_R_PATH_NOT_FOUND;
+    const char *p = romfs_path_relative(mount_of(norm), norm);
     if (!p) return FS_R_PATH_NOT_FOUND;
     if (file_index(p) != UINT64_MAX) {
         *out = FS_ENTRY_FILE;
@@ -863,7 +867,9 @@ static int dir_prefix(const char *path, char *out, size_t cap) {
         out[0] = 0;
         return 1;
     }
-    const char *rel = romfs_path_relative(mount_of(path), path);
+    char norm[1024];
+    if (!romfs_path_collapse(path, norm, sizeof norm)) return 0;
+    const char *rel = romfs_path_relative(mount_of(norm), norm);
     return rel && snprintf(out, cap, "%s/", rel) < (int)cap;
 }
 
