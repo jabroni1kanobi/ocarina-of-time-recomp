@@ -10,6 +10,7 @@ $d = Join-Path (Split-Path (Split-Path $PSScriptRoot)) 'build'
 $base = @{ OOT_VOLUME = '0'; OOT_ASYNC_PREEMPT = '0'; OOT_TRACE = 'perf'; OOT_ASSUME_FOCUS = '1'; OOT_BACKGROUND_WINDOW = '1' }
 foreach ($k in $Env.Keys) { $base[$k] = $Env[$k] }
 foreach ($k in $base.Keys) { Set-Item -Path "Env:\$k" -Value $base[$k] }
+New-Item -ItemType Directory -Force "$d\logs" | Out-Null   # a fresh clone has no build\logs yet
 $log = "$d\logs\$Name.log"
 for ($t = 1; $t -le $Tries; $t++) {
     $t0 = Get-Date

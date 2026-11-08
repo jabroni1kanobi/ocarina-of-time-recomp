@@ -24,14 +24,20 @@ As of 2026-11-07 (details, measurements and dates in [docs/phase3.md](docs/phase
   fights have not been played through yet.
 - Known: the movie upscaler network is skipped (the cinematics play unfiltered: its tensor-core layers are emulated
   and too slow); a dip to about 52-57 fps for a few seconds facing the door of Link's house in some runs; the first
-  visit of an area compiles shaders and pipelines (brief pop-in, once per PC); `DrawMeshTasksIndirect` draws are not
-  drawn yet (no visible effect found).
+  visit of an area compiles shaders and pipelines (brief pop-in, once per PC); the window takes about a minute to
+  appear after starting.
 
 ## Build your own
 
-You need your own dump of the game (the `.nup`), MSYS2 with Clang, Python 3.12 and 3.14, and the .NET 10 SDK.
-[docs/building.md](docs/building.md) goes from the dump to a running `oot.exe` step by step: extract the dump into the
-ignored `build/` folder, lift the code into the ignored `generated/` folder, build the shader translator and the game.
+You need your own dump of the game (the `.nup`) and a Windows PC with a Vulkan 1.3 graphics card. Install MSYS2,
+Python 3.12, the .NET 10 SDK and Git for Windows ([docs/building.md](docs/building.md) lists the exact packages), then
+in this folder:
+
+    py -3.12 tools\make_game.py --nup "D:\Games\your-dump.nup" --shortcut
+
+One command checks the prerequisites and your dump's version, builds everything from the source in this repository
+on your PC (nothing prebuilt is downloaded) and leaves a "Ocarina of Time (Recomp)" shortcut on your Desktop.
+[docs/building.md](docs/building.md) has the details and the steps by hand.
 
 This repository contains no game content: no game files, no keys, no generated code, no shader caches. The content
 check (`tools/check_content.py`, run by the pre-commit hook and CI) keeps it that way. Do not share what the tools

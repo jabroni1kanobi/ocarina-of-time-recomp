@@ -6,25 +6,41 @@ extract your dump into the ignored `build/` folder, the lifter writes the game's
 
 ## What you need
 
-- Your own dump of the game: the Switch 2 `.nup` (title id `04004860224DEC00`, version 1.1.1). The `.nup` is not
-  encrypted: no keys are needed.
+- Your own dump of the game: the Switch 2 `.nup` (title id `04004860224DEC00`, version 1.1.1 with its update). The
+  `.nup` is not encrypted: no keys are needed. The builder checks every executable against `tools/data/supported.json`.
 - A GPU with Vulkan 1.3 and `VK_EXT_mesh_shader`, 8 GB of video memory or more (tested: AMD Radeon RX 9070, 16 GB).
-- About 8 GB of free disk on the drive of the dump (the RomFS is served from the dump itself through a hard link, so
-  the clone must be on the same drive; otherwise it is copied, 25 GB more).
-- [MSYS2](https://www.msys2.org/), with these UCRT64 packages (from an MSYS2 shell):
+- About 8 GB of free disk if this folder is on the same drive as the dump (the game files are served from the dump
+  itself through a hard link), 36 GB if not (they are copied). While the game runs, Windows may also grow its page
+  file by up to about 20 GB.
+- [MSYS2](https://www.msys2.org/) in `C:\msys64`, with these packages (from the "MSYS2 UCRT64" shell):
 
-      pacman -S --needed git patch mingw-w64-ucrt-x86_64-{clang,lld,gcc,ninja,sdl3,opus,dav1d,openh264,vulkan-headers,vulkan-loader,vulkan-memory-allocator,shaderc,spirv-tools}
+      pacman -S --needed mingw-w64-ucrt-x86_64-{clang,lld,gcc,ninja,sdl3,opus,dav1d,openh264,vulkan-headers,vulkan-loader,vulkan-memory-allocator}
 
-  `C:\msys64\ucrt64\bin` must be on `PATH` (the build looks for `clang`, `ld.lld` and `ninja` there).
-- Python 3.12 and Python 3.14 for Windows (python.org; the `py` launcher picks the version). 3.14 is needed by
-  `tools/extract_nup.py` for the standard library's `compression.zstd`; with [uv](https://docs.astral.sh/uv/),
-  `uv run --python 3.14 tools\extract_nup.py ...` does instead of `py -3.14`.
-- [Git for Windows](https://git-scm.com/download/win) first on `PATH`: step 2 fetches zstd with it (an MSYS2 git
-  waited forever on that fetch here).
-- The .NET 10 SDK, and the Visual Studio Build Tools with the C++ workload (the shader translator is published as a
-  native executable).
+- [Python](https://www.python.org/downloads/) 3.12 or newer for Windows (from python.org, not the Microsoft Store).
+- The [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (the shader translator). Visual Studio is not
+  needed; with its C++ tools installed the translator is built as a native executable, otherwise as a self-contained
+  .NET program (the same output).
+- [Git for Windows](https://git-scm.com/download/win) (the builder fetches zstd's source with it).
 
-## Steps
+## The one command
+
+Download or clone this repository (no game data in it), open PowerShell in its folder and run:
+
+    py -3.12 tools\make_game.py --nup "D:\Games\your-dump.nup" --shortcut
+
+It checks everything above first and lists whatever is missing, with what to install. Then it checks that your dump
+is the supported version, extracts it, translates the game's code to C, builds the shader translator, the game and a
+launcher, runs the game's self-test, and puts "Ocarina of Time (Recomp)" on your Desktop (`--shortcut`). It takes about
+15 minutes the first time and can be run again at any time: only what changed is redone. `--check` stops after the
+version check. Everything it writes stays in this folder (`build\`, `generated\`, `toolchain\`, `.venv-win\`): that
+is your game, never share it.
+
+To play: the Desktop shortcut, or `build\v131072\Play Ocarina of Time.exe`. The window takes about a minute to appear,
+and the first visit of each area compiles its shaders once (a brief stutter). Saves go to `build\profile`.
+
+The steps below are what the builder runs, for building by hand or finding out where something failed.
+
+## The steps by hand
 
 In a Windows shell (PowerShell or cmd), from the repository root:
 
